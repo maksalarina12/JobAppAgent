@@ -1,66 +1,143 @@
 # JobAppAgent
 
-A small remote-job discovery and matching assistant. It reads public job-board feeds, checks each application URL, scores listings against a configurable skills profile, stores seen jobs in SQLite, and sends new matches to Slack. It never applies to jobs automatically.
+**Asisten pencarian lowongan kerja berbasis Python dan Slack.** JobAppAgent mengumpulkan lowongan dari beberapa sumber publik, menyaringnya berdasarkan profil keterampilan, memeriksa tautan, lalu mengirimkan hasil yang relevan ke Slack. Bot hanya membantu menemukan peluang; bot tidak melamar pekerjaan atau menghubungi perekrut.
 
-## Components
+## Fitur
 
-- Sources: Remotive, Remote OK, Jobicy, Himalayas, Arbeitnow Germany, Arbeitnow UK, and We Work Remotely's public RSS feed. The app queries feeds in parallel and groups results by provider. Arbeitnow's public API aggregates postings largely from ATS systems and filters to remote roles. If there are no matches, it can use optional Brave web search (API key), Hacker News hiring-thread leads, then direct search links for LinkedIn, Glassdoor, Upwork, and Freelancer. The job APIs, RSS, and Hacker News fallback do not need keys. Coverage and freshness depend on each provider.
-- Verification: requires a valid HTTPS posting/application URL and a successful live HTTP response (200–399). This catches dead links; it does **not** prove an employer is genuine or that a vacancy is still open. Open the linked source/employer posting and confirm before applying.
-- Matching: transparent keyword overlap and optional location terms, no LLM or personal data required. Tune `profile.json`.
-- Persistence: SQLite database (`data/jobs.sqlite3` by default). Scheduled Actions restores/saves it through GitHub Actions cache, which is best effort and is not a durable database. For durable history use a hosted database or run the Slack process on a persistent host with a mounted disk.
-- Slack: Bolt Socket Mode; no public inbound server is needed. Create a Slack app, enable Socket Mode, add a bot token with `chat:write`, `commands`, and `app_mentions:read`, subscribe to `app_mention`, and add slash command `/jobs` with any placeholder request URL (Socket Mode delivers it over the socket). Install it and configure the two tokens below.
-- Schedule: GitHub Actions runs daily at 08:17 WIB and can be started manually with **Run workflow**. Add repository secret `SLACK_BOT_TOKEN` and repository variable `SLACK_CHANNEL_ID` to post alerts; the scheduled workflow does not need `SLACK_APP_TOKEN`.
+- Pencarian serentak dari Remotive, Remote OK, Jobicy, Himalayas, API Arbeitnow untuk Jerman dan Inggris, serta RSS We Work Remotely.
+- Pencocokan transparan berdasarkan judul posisi, keterampilan, dan lokasi di `profile.json`.
+- Pemeriksaan bahwa tautan lowongan menggunakan HTTPS dan dapat merespons.
+- Penghapusan duplikasi dan penyimpanan riwayat lokal menggunakan SQLite.
+- Pencarian interaktif lewat Slack Socket Mode dan notifikasi lowongan melalui GitHub Actions.
+- Fallback ke Brave Search (opsional), utas “Who is Hiring” di Hacker News, dan tautan pencarian portal kerja.
 
-The Actions workflow assumes this project directory is the root of its own GitHub repository. This workspace currently has no Git repository for JobAppAgent, so the schedule will not run until the project is published to GitHub. Scheduled alerts are automated; interactive `/jobs` commands still require a running Socket Mode process. GitHub Actions is a short-lived runner, not a persistent bot host.
+## Alur pencarian
 
-## Start
+```text
+Permintaan pencarian
+        │
+        ▼
+API lowongan + RSS ──► pencocokan profil ──► pemeriksaan tautan
+        │                                      │
+        └── jika tidak ada hasil cocok ────────┤
+                                               ▼
+                                   hasil dikelompokkan per sumber
+                                               │
+                                               ▼
+                                          Slack / CLI
+```
 
-Python 3.11+ is recommended.
+Hasil API ditampilkan dalam kelompok berdasarkan sumber. Jika tidak ada lowongan API yang lolos penyaringan, bot mencoba Brave Search jika `BRAVE_SEARCH_API_KEY` tersedia, mencari lead komunitas di Hacker News, lalu memberikan tautan pencarian langsung ke LinkedIn, Glassdoor, Upwork, dan Freelancer.
 
-```sh
+## Sumber data dan batas kepercayaan
+
+| Jenis | Sumber | Catatan |
+|---|---|---|
+| API lowongan | Remotive, Remote OK, Jobicy, Himalayas, Arbeitnow | Diambil saat pencarian; ketersediaan dan kesegaran mengikuti masing-masing penyedia. Arbeitnow mencakup lowongan remote dari Jerman dan Inggris. |
+| RSS | We Work Remotely | Feed publik; tautan sumber tetap dicantumkan. |
+| Web | Brave Search | Opsional dan memerlukan API key; hasil web perlu diperiksa pada situs perusahaan. |
+| Forum | Hacker News “Who is Hiring” | Lead dari komentar komunitas, bukan lowongan terverifikasi. |
+| Portal | LinkedIn, Glassdoor, Upwork, Freelancer | Bot memberikan tautan pencarian di portal. Bot tidak mengambil atau scrape isi portal tersebut. |
+
+> Pemeriksaan tautan hanya memastikan halaman merespons saat diperiksa. Itu tidak membuktikan perusahaan atau lowongan masih aktif. Periksa kembali situs perusahaan sebelum melamar.
+
+JobAppAgent tidak menggunakan scraping LinkedIn atau Glassdoor. API lowongan LinkedIn memerlukan akses partner yang disetujui; akses API Upwork memerlukan kredensial dan izin. Brave Search juga tidak wajib: biarkan `BRAVE_SEARCH_API_KEY` kosong untuk memakai API, RSS, Hacker News, dan tautan portal tanpa biaya API.
+
+## Persiapan
+
+- Python 3.11 atau lebih baru
+- Workspace Slack dan Slack app untuk fitur bot
+- GitHub repository untuk notifikasi terjadwal
+
+## Menjalankan secara lokal
+
+```bash
 cd JobAppAgent
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp .env.example .env
-python -m jobapp search --query "python developer"
 ```
 
-Interactive Slack search runs as a persistent process:
+Isi `.env` untuk koneksi Slack:
 
-```sh
-python -m jobapp slack
+```dotenv
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+SLACK_CHANNEL_ID=C...
+JOBAPP_DB_PATH=data/jobs.sqlite3
+JOBAPP_PROFILE_PATH=profile.json
+BRAVE_SEARCH_API_KEY=
 ```
 
-In Slack while the Socket Mode listener is running: `/jobs` searches the configured AI-role profile; `/jobs search ai engineer` searches feeds for a query and ranks results. API results are grouped by source. When they return no matches, fallback sections show web results, community leads, and official portal search links. `/jobs help` shows usage. Scheduled alerts run separately through GitHub Actions. The same search can be run locally without Slack.
+Jalankan pencarian dari terminal:
 
-## Configuration
+```bash
+python -m jobapp search --query "ai engineer"
+```
 
-Edit `profile.json` to set `title_keywords`, `keywords`, `locations`, and `minimum_score` (0–100). With `require_title_match: true`, API results must match a target role title before skill scoring. To enable the live web fallback, create a Brave Search API key and set `BRAVE_SEARCH_API_KEY` in `.env`; keep usage within the plan's allowance. Environment settings can override database/profile paths and Slack credentials. Secrets belong in `.env` locally (ignored by git) or GitHub Actions secrets. Do not commit credentials or database files.
+## Menghubungkan Slack
 
-Search is read-only and does not submit applications or message employers. A high match score indicates title/skill keyword overlap only, not eligibility or endorsement. Sources may omit jobs, repeat expired listings, or return broken links. Verification requests are bounded by timeouts and limited to role matches. Results show source and publication date when provided; an HTTP link check is not employer verification.
+1. Buat Slack app dan aktifkan **Socket Mode**.
+2. Tambahkan bot scopes `chat:write`, `commands`, dan `app_mentions:read`, lalu instal app ke workspace.
+3. Buat App-Level Token dengan scope `connections:write`.
+4. Buat slash command `/jobs` dan aktifkan event `app_mention`.
+5. Isi `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, dan `SLACK_CHANNEL_ID` di `.env`; undang bot ke channel tujuan.
+6. Jalankan listener:
 
-LinkedIn, Glassdoor, and freelance marketplaces are not scraped. LinkedIn's job APIs require approved partner access, Glassdoor prohibits automated scraping without permission, and Upwork API access requires developer credentials and permissions. Until those credentials are approved, the fallback provides direct searches on each portal instead of representing scraped pages as verified job listings. Brave Search is optional and metered; leave `BRAVE_SEARCH_API_KEY` empty for the no-cost path.
+   ```bash
+   python -m jobapp slack
+   ```
 
-## Slack setup (Socket Mode)
+Selama listener berjalan, gunakan:
 
-1. Buat Slack app di https://api.slack.com/apps (From scratch).
-2. OAuth & Permissions → Bot Token Scopes: `chat:write`, `commands`, `app_mentions:read` → Install to Workspace → salin `xoxb-...` (`SLACK_BOT_TOKEN`).
-3. Socket Mode → Enable → buat App-Level Token scope `connections:write` → salin `xapp-...` (`SLACK_APP_TOKEN`).
-4. Slash Commands → buat `/jobs` (Request URL placeholder OK).
-5. Event Subscriptions → subscribe `app_mention`.
-6. Salin Channel ID target (`C...`) → `SLACK_CHANNEL_ID`. Invite bot ke channel.
-7. Isi `.env` (jangan commit), lalu jalankan `python -m jobapp slack`.
+```text
+/jobs help
+/jobs
+/jobs search ai engineer
+```
 
-## Status & audit
+Listener Socket Mode harus tetap berjalan agar slash command mendapat respons. GitHub Actions menjalankan pencarian terjadwal, tetapi tidak menjaga listener interaktif tetap hidup.
 
-Lihat `docs/IMPLEMENTATION_AUDIT.md` untuk baseline dan update implementasi terakhir.
-The optional `job-application-agent` (npx) package is not required by this Python app.
+## Notifikasi otomatis lewat GitHub Actions
 
-## Tests
+Workflow `.github/workflows/daily-search.yml` menjalankan pencarian setiap hari pukul **08.17 WIB** dan dapat dijalankan manual melalui **Actions → Job alerts → Run workflow**.
 
-```sh
+Untuk mengaktifkannya:
+
+1. Jadikan direktori `JobAppAgent/` sebagai root repository GitHub tersendiri, lalu push kode ke repository tersebut.
+2. Di **Settings → Secrets and variables → Actions**, tambahkan:
+   - Repository secret `SLACK_BOT_TOKEN`.
+   - Repository variable `SLACK_CHANNEL_ID`.
+3. Pastikan workflow diizinkan berjalan pada repository tersebut.
+
+Workflow terjadwal hanya memerlukan bot token dan channel ID; `SLACK_APP_TOKEN` dipakai oleh listener Socket Mode lokal. Database workflow disimpan melalui cache GitHub Actions, yang bersifat best-effort dan bukan penyimpanan permanen.
+
+## Menyesuaikan profil
+
+Edit `profile.json` untuk mengatur:
+
+- `title_keywords`: judul posisi sasaran.
+- `keywords`: keterampilan dan teknologi.
+- `locations`: lokasi atau cakupan remote.
+- `minimum_score`: nilai minimum kecocokan.
+- `require_title_match`: mewajibkan judul lowongan cocok dengan salah satu posisi sasaran.
+
+Skor adalah pencocokan kata kunci, bukan penilaian kelayakan atau rekomendasi otomatis.
+
+## Keamanan dan batasan
+
+- Simpan token Slack dan Brave hanya di `.env` lokal atau GitHub Secrets. Jangan commit token, `.env`, maupun database.
+- Bot hanya membaca sumber lowongan dan mengirim notifikasi; bot tidak melamar pekerjaan.
+- Sebagian sumber memperbarui data secara berkala, sehingga pencarian baru tidak selalu berarti data baru saja diterbitkan.
+- Tautan yang aktif belum tentu lowongannya masih dibuka atau perusahaan telah terverifikasi.
+- SQLite dan cache GitHub Actions ditujukan untuk prototipe personal, bukan layanan multi-pengguna atau penyimpanan jangka panjang.
+- Brave Search bersifat opsional dan menggunakan API berbayar; tanpa key, fallback web dilewati.
+
+## Menjalankan tes
+
+```bash
 python -m unittest discover -s tests -v
 ```
 
-Tests use synthetic listings and mocked HTTP; they do not verify live feed availability, Slack installation/authentication, or the Actions schedule. Those integrations remain untested until run with real accounts and network access.
+Tes menggunakan data sintetis dan HTTP mock. Tes tersebut tidak membuktikan feed eksternal, instalasi Slack, maupun workflow GitHub berjalan live.
