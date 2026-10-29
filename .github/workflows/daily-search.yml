@@ -1,0 +1,43 @@
+name: Job alerts
+
+on:
+  # 08:17 WIB every day (GitHub cron uses UTC).
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jobapp-alerts
+  cancel-in-progress: false
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: jobapp-sqlite-${{ github.run_id }}
+          restore-keys: jobapp-sqlite-
+      - name: Install JobAppAgent
+        run: pip install .
+      - name: Search feeds and send Slack alerts
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+          JOBAPP_DB_PATH: data/jobs.sqlite3
+          PYTHONUNBUFFERED: "1"
+        run: python -m jobapp scheduled
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data
+          key: jobapp-sqlite-${{ github.run_id }}
