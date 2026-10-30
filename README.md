@@ -216,7 +216,6 @@ GitHub Actions execution.
      **risk flags with cited evidence**, not accusations
 - [ ] Application tracking — `saved → shortlisted → applied → interview →
      rejected/offer/archived` with follow-up reminders
-- [ ] Tests run in CI, no local setup required
 - [ ] Structured logs and per-run summaries
 
 ## 📁 Project Structure
