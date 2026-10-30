@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Remote job discovery, verification, matching, and alerts"
 requires-python = ">=3.11"
 dependencies = ["slack-bolt>=1.20,<2"]
+license = { text = "MIT" }
 
 [tool.setuptools.packages.find]
 include = ["jobapp*"]
